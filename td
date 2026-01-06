@@ -37,7 +37,8 @@ require_init() {
   DB_FILE="$TD_DIR/tasks.db"
 }
 
-sql() { sqlite3 -json "$DB_FILE" "$1" 2>/dev/null || sqlite3 "$DB_FILE" "$1"; }
+# sql_json: returns JSON array directly (use for queries returning JSON)
+sql_json() { sqlite3 "$DB_FILE" "$1"; }
 sql_exec() { sqlite3 "$DB_FILE" <<< "$1"; }
 
 JSON_OUTPUT=false
@@ -125,7 +126,7 @@ cmd_create() {
   fi
   
   if $JSON_OUTPUT; then
-    sql "SELECT json_object('id', id, 'title', title, 'description', description, 'type', type, 'priority', priority, 'status', status, 'parent', parent, 'created', created, 'updated', updated) FROM tasks WHERE id='$id';"
+    sql_json "SELECT json_object('id', id, 'title', title, 'description', description, 'type', type, 'priority', priority, 'status', status, 'parent', parent, 'created', created, 'updated', updated) FROM tasks WHERE id='$id';"
   else
     echo -e "${GREEN}created${NC} $id: $title"
   fi
@@ -145,7 +146,7 @@ cmd_list() {
   done
   
   if $JSON_OUTPUT; then
-    sql "SELECT json_group_array(json_object('id', id, 'title', title, 'description', description, 'type', type, 'priority', priority, 'status', status, 'parent', parent, 'labels', COALESCE((SELECT json_group_array(label) FROM labels WHERE task_id=id), '[]'), 'blockers', COALESCE((SELECT json_group_array(blocker_id) FROM blockers WHERE task_id=id), '[]'), 'created', created, 'updated', updated)) FROM tasks WHERE $where ORDER BY priority, created;"
+    sql_json "SELECT json_group_array(json_object('id', id, 'title', title, 'description', description, 'type', type, 'priority', priority, 'status', status, 'parent', parent, 'labels', COALESCE((SELECT json_group_array(label) FROM labels WHERE task_id=id), '[]'), 'blockers', COALESCE((SELECT json_group_array(blocker_id) FROM blockers WHERE task_id=id), '[]'), 'created', created, 'updated', updated)) FROM tasks WHERE $where ORDER BY priority, created;"
   else
     sql_exec ".mode tabs
 .headers off
@@ -172,7 +173,7 @@ cmd_ready() {
   "
   
   if $JSON_OUTPUT; then
-    sql "SELECT json_group_array(json_object('id', id, 'title', title, 'priority', priority)) FROM ($query);"
+    sql_json "SELECT json_group_array(json_object('id', id, 'title', title, 'priority', priority)) FROM ($query);"
   else
     sql_exec ".mode tabs
 .headers off
@@ -191,7 +192,7 @@ cmd_show() {
   [[ "$exists" -eq 0 ]] && die "task $id not found"
   
   if $JSON_OUTPUT; then
-    sql "SELECT json_object('id', id, 'title', title, 'description', description, 'type', type, 'priority', priority, 'status', status, 'parent', parent, 'labels', COALESCE((SELECT json_group_array(label) FROM labels WHERE task_id=id), '[]'), 'blockers', COALESCE((SELECT json_group_array(blocker_id) FROM blockers WHERE task_id=id), '[]'), 'created', created, 'updated', updated) FROM tasks WHERE id='$id';"
+    sql_json "SELECT json_object('id', id, 'title', title, 'description', description, 'type', type, 'priority', priority, 'status', status, 'parent', parent, 'labels', COALESCE((SELECT json_group_array(label) FROM labels WHERE task_id=id), '[]'), 'blockers', COALESCE((SELECT json_group_array(blocker_id) FROM blockers WHERE task_id=id), '[]'), 'created', created, 'updated', updated) FROM tasks WHERE id='$id';"
   else
     sql_exec ".mode line
 SELECT id, title, status, priority, type, description, created, updated FROM tasks WHERE id='$id';"
@@ -229,7 +230,7 @@ cmd_done() {
     sql_exec "UPDATE tasks SET status='closed', updated='$ts' WHERE id='$id';"
     $JSON_OUTPUT || echo -e "${GREEN}closed${NC} $id"
   done
-  $JSON_OUTPUT && sql "SELECT json_group_array(json_object('id', id, 'status', status)) FROM tasks WHERE id IN ($(printf "'%s'," "$@" | sed 's/,$//'));"
+  $JSON_OUTPUT && sql_json "SELECT json_group_array(json_object('id', id, 'status', status)) FROM tasks WHERE id IN ($(printf "'%s'," "$@" | sed 's/,$//'));"
 }
 
 cmd_reopen() {
@@ -296,7 +297,7 @@ cmd_search() {
   require_init
   local query="$1"
   if $JSON_OUTPUT; then
-    sql "SELECT json_group_array(json_object('id', id, 'title', title, 'status', status)) FROM tasks WHERE title LIKE '%$query%' OR description LIKE '%$query%';"
+    sql_json "SELECT json_group_array(json_object('id', id, 'title', title, 'status', status)) FROM tasks WHERE title LIKE '%$query%' OR description LIKE '%$query%';"
   else
     sql_exec "SELECT id, title FROM tasks WHERE title LIKE '%$query%' OR description LIKE '%$query%';"
   fi
@@ -311,13 +312,13 @@ cmd_compact() {
 
 cmd_stats() {
   require_init
-  sql "SELECT json_object('total', (SELECT COUNT(*) FROM tasks), 'open', (SELECT COUNT(*) FROM tasks WHERE status='open'), 'in_progress', (SELECT COUNT(*) FROM tasks WHERE status='in_progress'), 'closed', (SELECT COUNT(*) FROM tasks WHERE status='closed'));"
+  sql_json "SELECT json_object('total', (SELECT COUNT(*) FROM tasks), 'open', (SELECT COUNT(*) FROM tasks WHERE status='open'), 'in_progress', (SELECT COUNT(*) FROM tasks WHERE status='in_progress'), 'closed', (SELECT COUNT(*) FROM tasks WHERE status='closed'));"
 }
 
 cmd_export() {
   require_init
   # Export to JSONL for git-friendly diffs
-  sql "SELECT json_object('id', id, 'title', title, 'description', description, 'type', type, 'priority', priority, 'status', status, 'parent', parent, 'labels', COALESCE((SELECT json_group_array(label) FROM labels WHERE task_id=tasks.id), '[]'), 'blockers', COALESCE((SELECT json_group_array(blocker_id) FROM blockers WHERE task_id=tasks.id), '[]'), 'created', created, 'updated', updated) FROM tasks ORDER BY id;" | jq -c '.[]' 2>/dev/null || cat
+  sql_json "SELECT json_object('id', id, 'title', title, 'description', description, 'type', type, 'priority', priority, 'status', status, 'parent', parent, 'labels', COALESCE((SELECT json_group_array(label) FROM labels WHERE task_id=tasks.id), '[]'), 'blockers', COALESCE((SELECT json_group_array(blocker_id) FROM blockers WHERE task_id=tasks.id), '[]'), 'created', created, 'updated', updated) FROM tasks ORDER BY id;" | jq -c '.[]' 2>/dev/null || cat
 }
 
 cmd_import() {
